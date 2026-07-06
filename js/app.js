@@ -11,8 +11,10 @@ window.addEventListener("DOMContentLoaded", () => {
   const activeTf = document.querySelector("#tf-group button.active");
   chart.load(CONFIG.DEFAULT_PRODUCT, parseInt(activeTf.dataset.tf, 10));
 
-  market.primeAll();   // REST snapshot so the watchlist fills immediately
-  market.connect();    // then stream everything live
+  market.connect();    // stream everything live
+  // REST snapshot fills the watchlist immediately; sparklines load after
+  // the prime finishes so the two request bursts don't trip rate limits
+  market.primeAll().then(() => ui.loadSparks());
 
   // expose for curious devtools users
   window.pulsetrade = { market, engine, chart, ui };

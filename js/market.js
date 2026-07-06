@@ -82,7 +82,7 @@ class MarketData {
   async primeAll() {
     for (const p of CONFIG.PRODUCTS) {
       this.fetchStats(p.id).catch(() => {});
-      await new Promise((r) => setTimeout(r, 120));
+      await new Promise((r) => setTimeout(r, 250));
     }
   }
 

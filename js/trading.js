@@ -1,7 +1,13 @@
 /* PulseTrade — paper trading engine.
    Long-only spot simulation: $100k starting cash, market + limit orders,
    average-cost positions, 0.10% fee, realized/unrealized P&L, localStorage
-   persistence. Emits: "change" (state mutated), "fill" (order executed).
+   persistence. Emits: "change" (state mutated), "fill" (order executed),
+   "reject" (a resting order could not fill and was cancelled).
+
+   Accounting model: cost basis is fee-inclusive. avgEntry is the true
+   break-even price (buy price + buy fee amortized), sells realize
+   (proceeds - fee) - basis. This makes the identity hold exactly:
+     equity - startingCash === realizedPnl + totalUnrealizedPnl
 */
 "use strict";
 
@@ -75,6 +81,24 @@ class TradingEngine {
     return this.state.cash + holdings;
   }
 
+  /* cash committed to resting limit BUY orders (fee included) */
+  reservedCash(excludeId) {
+    return this.state.openOrders
+      .filter((o) => o.side === "buy" && o.id !== excludeId)
+      .reduce((s, o) => s + o.qty * o.limitPrice * (1 + CONFIG.FEE_RATE), 0);
+  }
+
+  /* cash actually free to spend on a new order */
+  availableCash() {
+    return Math.max(0, this.state.cash - this.reservedCash());
+  }
+
+  /* qty free to sell: held minus qty committed to resting limit sells */
+  availableQty(productId) {
+    const held = this.position(productId)?.qty ?? 0;
+    return Math.max(0, held - this._reservedQty(productId));
+  }
+
   recordEquityPoint() {
     const eq = this.equity();
     const curve = this.state.equityCurve;
@@ -93,19 +117,20 @@ class TradingEngine {
 
     if (type === "limit") {
       if (!(limitPrice > 0)) return { ok: false, error: "Enter a valid limit price." };
-      // Marketable limit orders execute immediately at the limit
+      // Marketable limit orders execute immediately, at the (better) market price
       const marketable = side === "buy" ? mark <= limitPrice : mark >= limitPrice;
-      if (marketable) return this._execute({ productId, side, type: "limit", qty, price: limitPrice });
+      if (marketable) return this._execute({ productId, side, type: "limit", qty, price: mark });
 
-      const cost = qty * limitPrice * (1 + CONFIG.FEE_RATE);
-      if (side === "buy" && cost > this.state.cash + 1e-9) {
-        return { ok: false, error: `Insufficient cash: need ${fmtUsd(cost)}, have ${fmtUsd(this.state.cash)}.` };
-      }
-      if (side === "sell") {
-        const held = this.position(productId)?.qty ?? 0;
-        const reserved = this._reservedQty(productId);
-        if (qty > held - reserved + 1e-12) {
-          return { ok: false, error: `Insufficient ${productId.split("-")[0]}: ${fmtQty(held - reserved)} available.` };
+      if (side === "buy") {
+        const cost = qty * limitPrice * (1 + CONFIG.FEE_RATE);
+        const free = this.availableCash();
+        if (cost > free + 1e-9) {
+          return { ok: false, error: `Insufficient cash: need ${fmtUsd(cost)}, ${fmtUsd(free)} free (open buy orders reserve the rest).` };
+        }
+      } else {
+        const free = this.availableQty(productId);
+        if (qty > free + 1e-12) {
+          return { ok: false, error: `Insufficient ${productId.split("-")[0]}: ${fmtQty(free)} available (open sell orders reserve the rest).` };
         }
       }
       this.state.openOrders.push({
@@ -116,6 +141,19 @@ class TradingEngine {
       return { ok: true, resting: true };
     }
 
+    // market orders may not touch cash/qty reserved by resting limit orders
+    if (side === "sell") {
+      const free = this.availableQty(productId);
+      if (qty > free + 1e-12) {
+        return { ok: false, error: `Insufficient ${productId.split("-")[0]}: ${fmtQty(free)} available (open sell orders reserve the rest).` };
+      }
+    } else {
+      const cost = qty * mark * (1 + CONFIG.FEE_RATE);
+      const free = this.availableCash();
+      if (cost > free + 1e-9) {
+        return { ok: false, error: `Insufficient cash: need ${fmtUsd(cost)}, ${fmtUsd(free)} free (open buy orders reserve the rest).` };
+      }
+    }
     return this._execute({ productId, side, type: "market", qty, price: mark });
   }
 
@@ -137,6 +175,9 @@ class TradingEngine {
   closePosition(productId) {
     const pos = this.position(productId);
     if (!pos) return { ok: false, error: "No position." };
+    // closing means selling everything: resting sells on this market are cancelled first
+    this.state.openOrders = this.state.openOrders.filter(
+      (o) => !(o.productId === productId && o.side === "sell"));
     return this._execute({ productId, side: "sell", type: "market", qty: pos.qty, price: this.market.price(productId) });
   }
 
@@ -147,7 +188,12 @@ class TradingEngine {
     );
     for (const o of due) {
       this.state.openOrders = this.state.openOrders.filter((x) => x.id !== o.id);
-      this._execute({ productId: o.productId, side: o.side, type: "limit", qty: o.qty, price: o.limitPrice });
+      const res = this._execute({ productId: o.productId, side: o.side, type: "limit", qty: o.qty, price: o.limitPrice });
+      if (!res.ok) {
+        // couldn't honor the resting order (e.g. balance changed) — surface it
+        this.emit("reject", { order: o, reason: res.error });
+        this.emit("change");
+      }
     }
   }
 
@@ -168,10 +214,11 @@ class TradingEngine {
       s.cash -= cost;
       const pos = s.positions[productId];
       if (pos) {
-        pos.avgEntry = (pos.avgEntry * pos.qty + price * qty) / (pos.qty + qty);
+        // fee-inclusive average cost: avgEntry is the break-even price
+        pos.avgEntry = (pos.avgEntry * pos.qty + cost) / (pos.qty + qty);
         pos.qty += qty;
       } else {
-        s.positions[productId] = { qty, avgEntry: price };
+        s.positions[productId] = { qty, avgEntry: cost / qty };
       }
     } else {
       const pos = s.positions[productId];
@@ -179,7 +226,7 @@ class TradingEngine {
         return { ok: false, error: `Insufficient ${productId.split("-")[0]} to sell.` };
       }
       qty = Math.min(qty, pos.qty);
-      realized = (price - pos.avgEntry) * qty - fee;
+      realized = (value - fee) - pos.avgEntry * qty; // proceeds minus fee-inclusive basis
       s.cash += value - fee;
       s.realizedPnl += realized;
       pos.qty -= qty;

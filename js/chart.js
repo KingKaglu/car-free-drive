@@ -14,6 +14,9 @@ class PriceChart {
     this.loadToken = 0;
 
     const C = CONFIG.COLORS;
+    // Lightweight Charts renders epoch times as UTC; shifting intraday
+    // timestamps by the local offset makes the axis read in local time.
+    this.tzOffsetSec = -new Date().getTimezoneOffset() * 60;
     this.chart = LightweightCharts.createChart(host, {
       layout: {
         background: { type: "solid", color: "transparent" },
@@ -84,10 +87,10 @@ class PriceChart {
       const data = await this.market.fetchCandleHistory(productId, granularity);
       if (token !== this.loadToken) return; // superseded by a newer load
       this.candles.setData(data.map((c) => ({
-        time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
+        time: this._displayTime(c.time), open: c.open, high: c.high, low: c.low, close: c.close,
       })));
       this.volume.setData(data.map((c) => ({
-        time: c.time,
+        time: this._displayTime(c.time),
         value: c.volume,
         color: c.close >= c.open ? "rgba(12,163,12,0.35)" : "rgba(208,59,59,0.35)",
       })));
@@ -121,13 +124,18 @@ class PriceChart {
     }
 
     const lc = this.lastCandle;
-    this.candles.update({ time: lc.time, open: lc.open, high: lc.high, low: lc.low, close: lc.close });
+    this.candles.update({ time: this._displayTime(lc.time), open: lc.open, high: lc.high, low: lc.low, close: lc.close });
     this.volume.update({
-      time: lc.time,
+      time: this._displayTime(lc.time),
       value: lc.volume,
       color: lc.close >= lc.open ? "rgba(12,163,12,0.35)" : "rgba(208,59,59,0.35)",
     });
     if (!this._hovering) this._renderLegend(lc);
+  }
+
+  /* daily candles stay on their UTC date; intraday shifts to local time */
+  _displayTime(t) {
+    return this.granularity >= 86400 ? t : t + this.tzOffsetSec;
   }
 
   _onCrosshair(param) {

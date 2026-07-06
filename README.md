@@ -9,9 +9,11 @@ zero risk.
 
 ## Features
 
-- **Real-time prices** — WebSocket ticker feed for 12 major crypto markets
-  (BTC, ETH, SOL, XRP, DOGE, ADA, AVAX, LINK, DOT, LTC, UNI, AAVE), with an
-  automatic REST-polling fallback and exponential-backoff reconnect.
+- **Real-time prices** — WebSocket ticker feed for 29 crypto markets
+  (BTC, ETH, SOL, XRP, DOGE, ADA, AVAX, LINK, DOT, LTC, UNI, AAVE, BCH,
+  SHIB, PEPE, ATOM, NEAR, ARB, OP, APT, SUI, FIL, ICP, ETC, HBAR, XLM,
+  ALGO, CRO, INJ), with an automatic REST-polling fallback and
+  exponential-backoff reconnect.
 - **Professional charting** — TradingView Lightweight Charts™ candlesticks +
   volume, six timeframes (1m → 1D), ~600 bars of history, live candle rolls
   forward tick-by-tick, OHLC crosshair legend.
@@ -56,7 +58,16 @@ Or deploy to GitHub Pages / Netlify / Vercel as a plain static site.
 
 The trading engine (`js/trading.js`) is a long-only spot simulator: buys
 average into a position, sells realize P&L against the average entry, and
-every fill pays a 0.10% taker fee. Equity = cash + Σ(position × mark).
+every fill pays a 0.10% taker fee. Cost basis is **fee-inclusive** (the
+Entry column is your break-even price), so the books always reconcile:
+
+```
+equity − starting cash ≡ realized P&L + unrealized P&L
+```
+
+Resting limit buys reserve cash and resting limit sells reserve coins, so
+you can't spend or sell what an open order already claims. Marketable
+limit orders fill immediately at the better market price.
 
 ## Disclaimer
 

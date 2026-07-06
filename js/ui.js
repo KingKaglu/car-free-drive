@@ -23,6 +23,8 @@ class UI {
     market.on("status", (s) => this._onStatus(s));
     engine.on("change", () => this.renderAccount());
     engine.on("fill", (f) => this._onFill(f));
+    engine.on("reject", ({ order, reason }) =>
+      this.toast(`Limit ${order.side} cancelled — ${order.productId}`, reason, "error"));
 
     this.renderAccount();
     // live P&L / equity refresh
@@ -60,11 +62,12 @@ class UI {
       }
     });
 
-    this._loadSparks();
   }
 
-  async _loadSparks() {
-    // one 24h hourly-candle fetch per product, staggered for rate limits
+  /* one 24h hourly-candle fetch per product, staggered for rate limits.
+     Called from app.js after the watchlist prime finishes so the two
+     REST bursts don't overlap. */
+  async loadSparks() {
     for (const p of CONFIG.PRODUCTS) {
       try {
         const end = new Date();
@@ -73,7 +76,7 @@ class UI {
         this.sparks[p.id] = candles;
         this._drawSpark(p.id);
       } catch {}
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, 250));
     }
   }
 
@@ -232,16 +235,15 @@ class UI {
         const pct = parseFloat(btn.dataset.pct);
         const input = document.getElementById("order-amount");
         if (this.side === "buy") {
-          // spend pct of cash (fee-adjusted so Max actually fits)
-          const spend = (this.engine.state.cash * pct) / (1 + CONFIG.FEE_RATE);
+          // spend pct of free cash (fee-adjusted so Max actually fits)
+          const spend = (this.engine.availableCash() * pct) / (1 + CONFIG.FEE_RATE);
           if (this.amountUnit === "usd") input.value = spend > 0 ? spend.toFixed(2) : "";
           else {
             const p = this._workingPrice();
             input.value = p ? (spend / p).toFixed(6) : "";
           }
         } else {
-          const held = (this.engine.position(this.selected)?.qty ?? 0) - this.engine._reservedQty(this.selected);
-          const qty = Math.max(0, held) * pct;
+          const qty = this.engine.availableQty(this.selected) * pct;
           if (this.amountUnit === "base") input.value = qty ? qty.toFixed(8).replace(/\.?0+$/, "") : "";
           else {
             const p = this._workingPrice();
@@ -286,8 +288,8 @@ class UI {
     btn.textContent = `${this.side === "buy" ? "Buy" : "Sell"} ${base}`;
     btn.className = `submit-btn ${this.side}`;
     const avail = this.side === "buy"
-      ? fmtUsd(this.engine.state.cash)
-      : `${fmtQty(this.engine.position(this.selected)?.qty ?? 0)} ${base}`;
+      ? fmtUsd(this.engine.availableCash())
+      : `${fmtQty(this.engine.availableQty(this.selected))} ${base}`;
     document.getElementById("avail-note").textContent = avail;
   }
 
