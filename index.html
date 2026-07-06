@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PulseTrade — Demo Trading with Real-Time Market Data</title>
+  <meta name="description" content="Paper-trade crypto with a $100,000 virtual account against live Coinbase market data. Real prices, zero risk.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23161615'/%3E%3Cpath d='M5 21l6-8 5 5 6-9 5 6' fill='none' stroke='%230ca30c' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app" class="app">
+
+    <!-- ============ Header ============ -->
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="7" fill="var(--surface-2)"/>
+          <path d="M5 21l6-8 5 5 6-9 5 6" fill="none" stroke="var(--up)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="brand-text">
+          <span class="brand-name">PulseTrade</span>
+          <span class="brand-tag">Demo&nbsp;· real market data</span>
+        </div>
+      </div>
+
+      <div class="symbol-strip" id="symbol-strip">
+        <div class="symbol-strip-main">
+          <span class="ss-pair" id="ss-pair">BTC-USD</span>
+          <span class="ss-price" id="ss-price">—</span>
+          <span class="ss-change badge" id="ss-change">—</span>
+        </div>
+        <dl class="ss-stats">
+          <div><dt>24h High</dt><dd id="ss-high">—</dd></div>
+          <div><dt>24h Low</dt><dd id="ss-low">—</dd></div>
+          <div><dt>24h Volume</dt><dd id="ss-vol">—</dd></div>
+          <div><dt>Bid / Ask</dt><dd id="ss-spread">—</dd></div>
+        </dl>
+      </div>
+
+      <div class="topbar-right">
+        <div class="conn" id="conn" data-state="connecting">
+          <span class="conn-dot"></span><span class="conn-label">Connecting</span>
+        </div>
+        <div class="equity-pill" title="Total account equity (cash + holdings)">
+          <span class="equity-label">Equity</span>
+          <span class="equity-value" id="equity-value">$100,000.00</span>
+          <span class="equity-delta" id="equity-delta"></span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ============ Main grid ============ -->
+    <main class="layout">
+
+      <!-- Watchlist -->
+      <aside class="panel watchlist-panel" aria-label="Watchlist">
+        <div class="panel-head">
+          <h2>Markets</h2>
+          <input type="search" id="watchlist-filter" class="wl-filter" placeholder="Search" aria-label="Filter markets">
+        </div>
+        <ul class="watchlist" id="watchlist" role="listbox" aria-label="Market watchlist"></ul>
+      </aside>
+
+      <!-- Chart + bottom tabs -->
+      <section class="center-col">
+        <div class="panel chart-panel">
+          <div class="chart-toolbar">
+            <div class="tf-group" id="tf-group" role="tablist" aria-label="Timeframe">
+              <button role="tab" data-tf="60">1m</button>
+              <button role="tab" data-tf="300">5m</button>
+              <button role="tab" data-tf="900" aria-selected="true" class="active">15m</button>
+              <button role="tab" data-tf="3600">1h</button>
+              <button role="tab" data-tf="21600">6h</button>
+              <button role="tab" data-tf="86400">1D</button>
+            </div>
+            <div class="chart-legend" id="chart-legend"></div>
+          </div>
+          <div class="chart-host" id="chart-host">
+            <div class="chart-loading" id="chart-loading">Loading chart…</div>
+          </div>
+        </div>
+
+        <div class="panel bottom-panel">
+          <div class="tabs" role="tablist" aria-label="Account activity">
+            <button class="tab active" role="tab" aria-selected="true" data-tab="positions">Positions <span class="tab-count" id="count-positions">0</span></button>
+            <button class="tab" role="tab" data-tab="orders">Open Orders <span class="tab-count" id="count-orders">0</span></button>
+            <button class="tab" role="tab" data-tab="history">History</button>
+            <button class="tab" role="tab" data-tab="account">Account</button>
+          </div>
+
+          <div class="tab-pane active" id="pane-positions">
+            <table class="data-table" aria-label="Open positions">
+              <thead><tr>
+                <th>Market</th><th class="num">Size</th><th class="num">Entry</th>
+                <th class="num">Mark</th><th class="num">Value</th><th class="num">Unrealized P&amp;L</th><th></th>
+              </tr></thead>
+              <tbody id="positions-body"></tbody>
+            </table>
+            <p class="empty-msg" id="positions-empty">No open positions. Place your first trade with the order panel →</p>
+          </div>
+
+          <div class="tab-pane" id="pane-orders">
+            <table class="data-table" aria-label="Open orders">
+              <thead><tr>
+                <th>Market</th><th>Side</th><th>Type</th><th class="num">Limit Price</th>
+                <th class="num">Size</th><th class="num">Value</th><th>Placed</th><th></th>
+              </tr></thead>
+              <tbody id="orders-body"></tbody>
+            </table>
+            <p class="empty-msg" id="orders-empty">No open orders.</p>
+          </div>
+
+          <div class="tab-pane" id="pane-history">
+            <table class="data-table" aria-label="Trade history">
+              <thead><tr>
+                <th>Time</th><th>Market</th><th>Side</th><th>Type</th>
+                <th class="num">Price</th><th class="num">Size</th><th class="num">Value</th><th class="num">Fee</th><th class="num">Realized P&amp;L</th>
+              </tr></thead>
+              <tbody id="history-body"></tbody>
+            </table>
+            <p class="empty-msg" id="history-empty">No trades yet.</p>
+          </div>
+
+          <div class="tab-pane" id="pane-account">
+            <div class="account-grid">
+              <div class="stat-tile">
+                <span class="stat-label">Total Equity</span>
+                <span class="stat-value" id="acct-equity">—</span>
+                <span class="stat-sub" id="acct-equity-delta"></span>
+              </div>
+              <div class="stat-tile">
+                <span class="stat-label">Cash Balance</span>
+                <span class="stat-value" id="acct-cash">—</span>
+                <span class="stat-sub">available to trade</span>
+              </div>
+              <div class="stat-tile">
+                <span class="stat-label">Unrealized P&amp;L</span>
+                <span class="stat-value" id="acct-upnl">—</span>
+                <span class="stat-sub">open positions</span>
+              </div>
+              <div class="stat-tile">
+                <span class="stat-label">Realized P&amp;L</span>
+                <span class="stat-value" id="acct-rpnl">—</span>
+                <span class="stat-sub" id="acct-trades">0 trades</span>
+              </div>
+              <div class="stat-tile equity-chart-tile">
+                <span class="stat-label">Session Equity</span>
+                <canvas id="equity-spark" width="600" height="80" role="img" aria-label="Equity over this session"></canvas>
+              </div>
+              <div class="stat-tile reset-tile">
+                <span class="stat-label">Demo Account</span>
+                <p class="reset-note">Started with $100,000 virtual cash. Fills are simulated at live market prices with a 0.10% fee.</p>
+                <button class="btn-ghost danger" id="reset-account">Reset account</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right rail -->
+      <aside class="right-col">
+        <div class="panel order-panel" aria-label="Order ticket">
+          <div class="side-toggle" role="tablist" aria-label="Order side">
+            <button class="side-btn buy active" data-side="buy" role="tab" aria-selected="true">Buy</button>
+            <button class="side-btn sell" data-side="sell" role="tab">Sell</button>
+          </div>
+
+          <div class="type-toggle" role="tablist" aria-label="Order type">
+            <button class="type-btn active" data-type="market" role="tab" aria-selected="true">Market</button>
+            <button class="type-btn" data-type="limit" role="tab">Limit</button>
+          </div>
+
+          <div class="field" id="limit-field" hidden>
+            <label for="limit-price">Limit price <span class="field-unit">USD</span></label>
+            <input type="text" inputmode="decimal" id="limit-price" placeholder="0.00" autocomplete="off">
+          </div>
+
+          <div class="field">
+            <label for="order-amount">Amount <span class="field-unit" id="amount-unit">USD</span></label>
+            <input type="text" inputmode="decimal" id="order-amount" placeholder="0.00" autocomplete="off">
+            <button class="unit-swap" id="unit-swap" type="button" title="Switch between USD and asset amount">⇅ <span id="unit-swap-label">use BTC</span></button>
+          </div>
+
+          <div class="pct-row" role="group" aria-label="Amount as percentage of available">
+            <button data-pct="0.25">25%</button>
+            <button data-pct="0.5">50%</button>
+            <button data-pct="0.75">75%</button>
+            <button data-pct="1">Max</button>
+          </div>
+
+          <dl class="order-summary">
+            <div><dt>Est. price</dt><dd id="est-price">—</dd></div>
+            <div><dt>Est. <span id="est-qty-label">qty</span></dt><dd id="est-qty">—</dd></div>
+            <div><dt>Fee (0.10%)</dt><dd id="est-fee">—</dd></div>
+            <div class="total"><dt>Total</dt><dd id="est-total">—</dd></div>
+          </dl>
+
+          <p class="order-error" id="order-error" hidden></p>
+
+          <button class="submit-btn buy" id="submit-order">Buy BTC</button>
+          <p class="avail-note">Available: <span id="avail-note">—</span></p>
+        </div>
+
+        <div class="panel trades-panel" aria-label="Live market trades">
+          <div class="panel-head">
+            <h2>Live Trades <span class="live-dot" aria-hidden="true"></span></h2>
+            <span class="panel-sub" id="trades-symbol">BTC-USD</span>
+          </div>
+          <div class="trades-head"><span>Price (USD)</span><span class="num">Size</span><span class="num">Time</span></div>
+          <ul class="trades-feed" id="trades-feed"></ul>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="foot">
+      <p>PulseTrade is a paper-trading demo. Live prices via Coinbase Exchange public market data. Nothing here is investment advice — no real money is ever at risk.</p>
+    </footer>
+  </div>
+
+  <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+
+  <script src="js/vendor/lightweight-charts.standalone.production.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/market.js"></script>
+  <script src="js/trading.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
